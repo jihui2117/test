@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>번화가 탈출 게임!</title>
+    <!-- Tailwind CSS 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 구글 폰트 로드 (가독성을 위한 Noto Sans KR, 타이머를 위한 모노스페이스) -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background: #23243d;
+            color: #fff;
+            overflow-x: hidden;
+            isolation: isolate;
+        }
+
+        .market-backdrop {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .timer-font {
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        /* 오답 시 화면 흔들림 & 붉은 점멸 효과 */
+        @keyframes shake-red {
+            0% { transform: translateX(0); box-shadow: inset 0 0 0px rgba(255,0,0,0); }
+            20% { transform: translateX(-10px) rotate(-1deg); box-shadow: inset 0 0 50px rgba(255,0,0,0.8); }
+            40% { transform: translateX(10px) rotate(1deg); box-shadow: inset 0 0 50px rgba(255,0,0,0.8); }
+            60% { transform: translateX(-10px) rotate(-1deg); box-shadow: inset 0 0 50px rgba(255,0,0,0.8); }
+            80% { transform: translateX(10px) rotate(1deg); box-shadow: inset 0 0 50px rgba(255,0,0,0.8); }
+            100% { transform: translateX(0); box-shadow: inset 0 0 0px rgba(255,0,0,0); }
+        }
+
+        .penalty-anim {
+            animation: shake-red 0.4s ease-in-out;
+        }
+
+        /* 패널티 텍스트가 떠오르는 애니메이션 */
+        @keyframes float-up {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-50px) scale(1.5); }
+        }
+
+        .floating-penalty {
+            position: absolute;
+            color: #ff4757;
+            font-weight: 900;
+            font-size: 2rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            animation: float-up 1s forwards;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        /* 슬라이드 애니메이션 */
+        @keyframes slide-out-left {
+            0% { transform: translateX(0); opacity: 1; }
+            100% { transform: translateX(-100%); opacity: 0; }
+        }
+        @keyframes slide-in-right {
+            0% { transform: translateX(100%); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+        .slide-out .speech-bubble,
+        .slide-out #current-person { animation: slide-out-left 0.3s forwards ease-in; }
+        .slide-in .speech-bubble { animation: slide-in-right 0.3s forwards ease-out; }
+        @keyframes step-to-front {
+            from { transform: translate(57px, -10px) scale(.76); opacity: .6; }
+            to { transform: translate(0, 0) scale(1); opacity: 1; }
+        }
+        .slide-in #current-person {
+            transform-origin: 50px 60px;
+            animation: step-to-front 0.3s forwards ease-out;
+        }
+
+        .character-line {
+            width: min(100%, 320px);
+            height: auto;
+        }
+
+        /* 말풍선 스타일 */
+        .speech-bubble {
+            position: relative;
+            background: white;
+            border-radius: .4em;
+            color: black;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .speech-bubble:after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border: 20px solid transparent;
+            border-top-color: white;
+            border-bottom: 0;
+            margin-left: -20px;
+            margin-bottom: -20px;
+        }
+
+        /* 버튼 호버 액션 */
+        .answer-btn {
+            transition: all 0.2s;
+        }
+        .answer-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .answer-btn:active {
+            transform: translateY(1px);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 relative" id="game-container">
+
+    <!-- 게임 화면 뒤에 깔리는 저녁 시장 골목 일러스트 -->
+    <svg class="market-backdrop" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+        <defs>
+            <linearGradient id="market-sky" x2="0%" y2="100%">
+                <stop stop-color="#23243d"/>
+                <stop offset="1" stop-color="#8b5762"/>
+            </linearGradient>
+            <linearGradient id="market-ground" x2="0%" y2="100%">
+                <stop stop-color="#665163"/>
+                <stop offset="1" stop-color="#29263c"/>
+            </linearGradient>
+            <radialGradient id="market-glow">
+                <stop stop-color="#ffc477" stop-opacity=".5"/>
+                <stop offset="1" stop-color="#ffc477" stop-opacity="0"/>
+            </radialGradient>
+            <g id="market-window">
+                <rect width="33" height="46" rx="3" fill="#26243a"/>
+                <rect x="5" y="6" width="23" height="33" rx="2" fill="#c98563"/>
+                <path d="M16.5 6v33m-11.5-17h23" stroke="#5f4050" stroke-width="2"/>
+            </g>
+            <g id="market-lantern">
+                <circle r="35" fill="url(#market-glow)"/>
+                <path d="M0-24v11m0 27v7" stroke="#362839" stroke-width="2"/>
+                <rect x="-11" y="-13" width="22" height="28" rx="8" fill="#e49661"/>
+                <rect x="-5" y="-13" width="10" height="28" rx="5" fill="#f8b87a"/>
+                <path d="M-8-13H8M-8 15H8" stroke="#8f4b54" stroke-width="3" stroke-linecap="round"/>
+            </g>
+            <g id="market-stall">
+                <ellipse cx="150" cy="259" rx="140" ry="21" fill="#1c1b2b" opacity=".4"/>
+                <rect x="31" y="76" width="238" height="160" rx="5" fill="#382938"/>
+                <path d="M30 79v176m240-176v176" stroke="#704a4b" stroke-width="9"/>
+                <path d="M27 16h246l25 58H2z" fill="currentColor"/>
+                <path d="M54 16h27L69 74H36zm56 0h27l-2 58h-33zm55 0h27l8 58h-33zm55 0h27l20 58h-33z" fill="#f5d1a4" opacity=".8"/>
+                <path d="M2 74h296v9q-8 16-18 1-13 17-28 0-14 17-29 0-14 17-29 0-14 17-29 0-15 17-30 0-14 17-29 0-14 17-29 0-14 17-29 0-15 17-28 0Q10 99 2 83z" fill="currentColor"/>
+                <path d="M2 74h296" stroke="#f5d1a4" stroke-opacity=".35" stroke-width="3"/>
+                <path d="M74 88v18m152-18v18" stroke="#69434a" stroke-width="3"/>
+                <circle cx="74" cy="112" r="8" fill="#ffd08a"/>
+                <circle cx="226" cy="112" r="8" fill="#ffd08a"/>
+                <path d="M37 185h226v60H37z" fill="#775058"/>
+                <path d="M52 200h196v35H52z" fill="#61434e"/>
+                <path d="M34 187h232" stroke="#bd826b" stroke-width="8" stroke-linecap="round"/>
+            </g>
+            <g id="market-crate">
+                <path d="m-3 18 11-16h49l11 16z" fill="#523743"/>
+                <path d="M-3 18h71l-5 24H2z" fill="#a96b58"/>
+                <path d="M4 28h57m-54 7h51" stroke="#724b4b" stroke-width="2"/>
+            </g>
+            <g id="market-fruit">
+                <use href="#market-crate"/>
+                <circle cx="14" cy="15" r="8" fill="#de7054"/>
+                <circle cx="34" cy="13" r="10" fill="#ea9460"/>
+                <circle cx="53" cy="15" r="8" fill="#d67554"/>
+                <circle cx="25" cy="19" r="8" fill="#eda35d"/>
+                <circle cx="44" cy="20" r="8" fill="#d87153"/>
+                <path d="M34 5q2-7 9-5-1 6-9 5" fill="#81945e"/>
+            </g>
+            <g id="market-greens">
+                <use href="#market-crate"/>
+                <path d="M10 22Q0 7 14 6q6-8 13 2 3-12 13-7 6 1 7 10 6-8 13-3 7 9-4 16z" fill="#7d9569"/>
+                <path d="m19 22-5-10m20 10-2-14m15 14 6-9" stroke="#adc18b" stroke-width="2" stroke-linecap="round"/>
+            </g>
+        </defs>
+
+        <path fill="url(#market-sky)" d="M0 0h1440v900H0z"/>
+        <path fill="#45364c" d="M0 574V231h112v-63h137v72h128v-43h107v155h96v-66h105v38h77v-46h108v83h71V177h142v63h84v-45h137v76h136v303z"/>
+        <path fill="#342a42" d="M0 595V153l232 38v81l176 33v274zm1440 0V127l-235 45v96l-157 27v284z"/>
+        <path d="m0 205 232 31m-232 7 232 27m1208-85-235 38m235 0-235 35" stroke="#6b4958" stroke-width="3" opacity=".7"/>
+        <use href="#market-window" x="63" y="279"/>
+        <use href="#market-window" x="133" y="290"/>
+        <use href="#market-window" x="275" y="345"/>
+        <use href="#market-window" x="1118" y="343"/>
+        <use href="#market-window" x="1264" y="275"/>
+        <use href="#market-window" x="1334" y="259"/>
+        <path d="M572 523V385h295v138z" fill="#604252"/>
+        <path d="M569 390h302l-29-29H598z" fill="#865764"/>
+        <path d="M607 425h41v98h-41zm73-1h79v99h-79zm112 1h41v98h-41z" fill="#443043"/>
+        <path d="M612 431h31v40h-31zm185 0h31v40h-31z" fill="#be7a60" opacity=".72"/>
+
+        <path fill="url(#market-ground)" d="M0 523h1440v377H0z"/>
+        <path d="M671 529 427 900m281-371-84 371m108-371 85 371m-45-371 245 371M0 578h1440M0 641h1440M0 737h1440M0 861h1440" fill="none" stroke="#aa8290" stroke-opacity=".19" stroke-width="2"/>
+        <ellipse cx="720" cy="704" rx="240" ry="155" fill="url(#market-glow)" opacity=".28"/>
+
+        <!-- 멀리 있는 가판대부터 그려 골목의 깊이를 표현합니다. -->
+        <use href="#market-stall" transform="translate(504 415) scale(.48)" color="#b06b5e"/>
+        <use href="#market-fruit" transform="translate(531 485) scale(.53)"/>
+        <use href="#market-greens" transform="translate(575 485) scale(.53)"/>
+        <use href="#market-stall" transform="translate(789 417) scale(.48)" color="#638e85"/>
+        <use href="#market-greens" transform="translate(815 487) scale(.53)"/>
+        <use href="#market-fruit" transform="translate(860 487) scale(.53)"/>
+
+        <use href="#market-stall" transform="translate(280 398) scale(.83)" color="#5d8e87"/>
+        <use href="#market-fruit" transform="translate(332 518) scale(.86)"/>
+        <use href="#market-greens" transform="translate(413 518) scale(.86)"/>
+        <use href="#market-stall" transform="translate(912 399) scale(.83)" color="#aa775b"/>
+        <use href="#market-fruit" transform="translate(958 518) scale(.86)"/>
+        <use href="#market-greens" transform="translate(1036 518) scale(.86)"/>
+
+        <use href="#market-stall" transform="translate(-39 357) scale(1.37)" color="#a85b67"/>
+        <use href="#market-greens" transform="translate(33 557) scale(1.4)"/>
+        <use href="#market-fruit" transform="translate(143 557) scale(1.4)"/>
+        <use href="#market-greens" transform="translate(252 557) scale(1.4)"/>
+        <use href="#market-stall" transform="translate(1076 352) scale(1.37)" color="#54778a"/>
+        <use href="#market-fruit" transform="translate(1151 552) scale(1.4)"/>
+        <use href="#market-greens" transform="translate(1262 552) scale(1.4)"/>
+        <use href="#market-fruit" transform="translate(1373 552) scale(1.4)"/>
+
+        <path d="M0 169Q720 438 1440 158M183 103q537 174 1074-3" fill="none" stroke="#31263d" stroke-width="3"/>
+        <path d="m449 172 30 5-20 29zm88 13 30 3-17 29zm89 10 30 2-16 30zm91 3 30-1-15 30zm90-5 30-3-12 31zm90-11 30-5-10 32zm87-17 29-6-9 32z" fill="#dfa56d" opacity=".9"/>
+        <path d="m493 179 29 4-18 28zm178 19 30 1-15 29zm181-10 30-4-11 31zm88-14 29-6-9 32z" fill="#bc6f77"/>
+        <use href="#market-lantern" x="115" y="232"/>
+        <use href="#market-lantern" x="304" y="278"/>
+        <use href="#market-lantern" x="503" y="308"/>
+        <use href="#market-lantern" x="705" y="324"/>
+        <use href="#market-lantern" x="908" y="308"/>
+        <use href="#market-lantern" x="1110" y="279"/>
+        <use href="#market-lantern" x="1315" y="222"/>
+    </svg>
+
+    <!-- 줄에 서 있는 아홉 명의 상반신 일러스트 -->
+    <svg width="0" height="0" class="absolute" aria-hidden="true" focusable="false">
+        <defs>
+            <linearGradient id="waist-fade" x2="0%" y2="100%">
+                <stop offset=".83" stop-color="white"/>
+                <stop offset="1" stop-color="white" stop-opacity="0"/>
+            </linearGradient>
+            <mask id="person-waist" maskUnits="userSpaceOnUse" x="-10" y="0" width="120" height="160">
+                <rect x="-10" width="120" height="160" fill="url(#waist-fade)"/>
+            </mask>
+            <g id="person-farmer">
+                <path d="M8 149 9 112q0-20 19-30l16-7h15l18 7q18 8 19 27l3 40-17 6H22z" fill="#5f8463"/>
+                <path d="M25 84l10-5 3 27h27l4-27 10 5-5 25 6 46H24l5-46z" fill="#526c80"/>
+                <path d="M40 117h23v11q-12 8-23 0z" fill="#718e9c"/>
+                <path d="M39 69h24v10l-11 10-13-10z" fill="#bd7c58"/>
+                <path d="M28 41q0-22 24-22 25 0 25 23l-2 15q-4 19-23 20-19-1-22-19z" fill="#d99b73"/>
+                <path d="M26 45q-5 1-4 7t8 6m46-12q7-1 7 5t-8 8" fill="#d99b73"/>
+                <path d="M29 49q-6-5-4-13l10-3 3 8-5 10zm44 0-5-10 10-4 2 8z" fill="#594039"/>
+                <path d="M21 35 29 17q4-6 14-7l21 1q9 1 11 7l8 17z" fill="#d6a052"/>
+                <path d="M25 27q28-5 55 1l3 8H21z" fill="#8a5441"/>
+                <path d="M6 37q4-6 46-6 39 0 45 7 0 8-45 7-44 0-46-8z" fill="#eac27d"/>
+                <path d="M38 52q3-3 6 0m15 0q3-3 6 0m-19 9q5 5 11 0" fill="none" stroke="#553938" stroke-width="2.4" stroke-linecap="round"/>
+                <path d="M25 100q-5 13-4 28l-2 23m63-51q5 13 5 27l2 24M12 130l6 3m73-1 6-3" fill="none" stroke="#44624f" stroke-width="2" stroke-linecap="round"/>
+            </g>
+            <g id="person-blonde">
+                <path d="M28 37q-4-19 13-26 26-10 37 15l6 52q2 18-9 23H21q-7-8-3-23z" fill="#cc8a46"/>
+                <path d="M13 155q4-48 17-65l13-9 17-1 14 9q13 17 16 66z" fill="#c96d82"/>
+                <path d="M29 91q-6 16-6 41m52-39q7 17 6 40" fill="none" stroke="#9a506f" stroke-width="2.5" stroke-linecap="round"/>
+                <path d="M42 67h19l3 17q-4 11-13 12-9-1-13-12z" fill="#e6a98b"/>
+                <path d="M34 31q2-9 17-9 16 0 19 12l2 19q-2 22-20 23-19-2-21-21z" fill="#f5c5a6"/>
+                <path d="M24 52q-6-30 12-39 11-6 24-3 24 6 22 42l-5 30-9 9q7-20 5-42-17-5-24-20-7 14-18 19l2 23 4 18-12-9z" fill="#ebad5a"/>
+                <path d="M53 16q15 4 21 20" fill="none" stroke="#ffce7d" stroke-width="3" stroke-linecap="round"/>
+                <path d="M39 52q3-3 6 0m12 0q3-3 6 0m-16 10q4 3 8 0" fill="none" stroke="#624043" stroke-width="2.3" stroke-linecap="round"/>
+                <circle cx="31" cy="64" r="3.2" fill="#fff0b0"/>
+                <circle cx="71" cy="64" r="3.2" fill="#fff0b0"/>
+                <path d="M65 85q5 23 3 45" fill="none" stroke="#7c534a" stroke-width="4.5" stroke-linecap="round"/>
+                <path d="m58 129 19-2 6 22q1 5-5 6l-20 1q-5 0-5-5z" fill="#aa624f"/>
+                <path d="m57 138 21-3" stroke="#cd8e6d" stroke-width="2" stroke-linecap="round"/>
+            </g>
+            <g id="person-elder">
+                <path d="M4 155q0-36 13-56 9-15 27-18l14-1q24 1 34 21 8 16 9 54z" fill="#7b889d"/>
+                <path d="M23 95l16-10 14 13 13-13 16 10-9 60H32z" fill="#9d786d"/>
+                <path d="M37 123h34m-36 11h38m-40 11h42" stroke="#d5ac91" stroke-opacity=".7" stroke-width="3"/>
+                <path d="M42 70h22v15L53 96 41 85z" fill="#d29178"/>
+                <path d="M32 27q4-15 21-14 19 1 24 16l1 23q-1 27-24 28-21-1-24-23z" fill="#e8b096"/>
+                <path d="M29 56q-9-8-7-20 1-9 9-13-1 14 3 21l-2 14zm48 0-4 2-2-14q4-8 3-21 9 5 10 15 1 11-7 18z" fill="#e2e2e2"/>
+                <path d="M39 39q5-3 9-2m11 0q5-1 9 2m-28 10h.1m23 0h.1" fill="none" stroke="#705258" stroke-width="2.4" stroke-linecap="round"/>
+                <path d="M53 56q-8-5-15 5 6 3 15-1 8 4 15 1-7-10-15-5z" fill="#f3ece3"/>
+                <path d="M48 68q6 3 11-1" fill="none" stroke="#80534d" stroke-width="2" stroke-linecap="round"/>
+                <path d="M26 105q-7 17-8 45m63-44q8 20 8 44M8 133l8 4m76 0 6-4" fill="none" stroke="#5b6982" stroke-width="2.2" stroke-linecap="round"/>
+            </g>
+            <g id="person-officer">
+                <path d="M2 153 5 106q2-19 22-26l16-7h15l20 7q21 7 23 25l5 48z" fill="#3f5c81"/>
+                <path d="M12 89l17-8 9 4-2 8-22 7zm84 1-18-9-9 4 2 8 22 7z" fill="#2b405f"/>
+                <path d="M24 104q-4 16-5 46m64-46q5 20 6 46m-36-54v55m-23-43h14m18 0h16" fill="none" stroke="#2e4768" stroke-width="2.6" stroke-linecap="round"/>
+                <path d="M42 66h22v12l-11 15-12-15z" fill="#ab674f"/>
+                <path d="m39 77 14 15-12 8-10-17zm27 0L53 92l12 8 10-17z" fill="#607a9d"/>
+                <path d="m70 104 7 2-2 7-5 4-5-4-2-7z" fill="#e9b86b"/>
+                <path d="M28 39q4-16 23-16 20 0 25 16l-2 22-8 11q-5 5-14 5-10 0-15-5l-8-11z" fill="#c08363"/>
+                <path d="M28 47q-7-3-7 4 0 6 8 9m46-13q7-3 7 4 0 6-8 9" fill="#c08363"/>
+                <path d="M22 40 17 29l8-10 26-10 29 9 7 11-6 12z" fill="#405f87"/>
+                <path d="M22 34q30-4 58 0l-3 9q-24 10-52 0z" fill="#263a5b"/>
+                <path d="m52 19 7 3-2 7-5 3-5-3-2-7z" fill="#efc477"/>
+                <path d="m37 51 7-1m15 0 7 1m-27 5h.1m23 0h.1m-16 9q5 3 11 0" fill="none" stroke="#55373e" stroke-width="2.2" stroke-linecap="round"/>
+            </g>
+            <g id="person-student">
+                <path d="M25 43q-2-23 21-26 26-3 30 23l2 37-11 8-34-3-9-10z" fill="#3b304b"/>
+                <path d="M9 155q5-41 12-58 6-15 25-17l14 1q17 2 25 15 9 17 11 59z" fill="#62537f"/>
+                <path d="M42 67h17v15q-7 13-18 0z" fill="#d39976"/>
+                <path d="m31 86 21 17 18-17 5 8-23 24-26-23z" fill="#b3a1c1"/>
+                <path d="M52 119v35" stroke="#443b5d" stroke-width="2.5"/>
+                <path d="M31 43q5-6 13-15 9 11 24 14l2 11q-2 22-19 24-18-2-21-22z" fill="#edb994"/>
+                <path d="M20 29 50 14l33 15-31 15z" fill="#594876"/>
+                <path d="m29 34 23 10 22-10v8q-20 11-44 0z" fill="#443655"/>
+                <path d="M78 31v22" stroke="#edbe68" stroke-width="2.5" stroke-linecap="round"/>
+                <path d="m78 51 3 7h-6z" fill="#edbe68"/>
+                <path d="M37 53h.1m24 0h.1m-15 10q5 3 9-1" fill="none" stroke="#593b42" stroke-width="2.5" stroke-linecap="round"/>
+                <path d="m25 107 37-10 11 38-37 10z" fill="#e2a679"/>
+                <path d="m29 107 32-8 2 5-32 9z" fill="#f7d5ac"/>
+                <path d="m42 119 14-4" stroke="#fcdfb3" stroke-width="2" stroke-linecap="round"/>
+                <path d="M78 101q6 17 7 48" fill="none" stroke="#504467" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M24 95q-9 13-11 34-1 11 5 15 5 4 13 1l20-9-4-11-19 7-1-2 5-19" fill="#62537f" stroke="#504467" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m46 126 5-4 3-5q2-2 4 0 1 1-1 4l6-3q3-1 4 1 1 2-2 4l-2 1q3 2 0 4l-13 7z" fill="#edb994"/>
+                <path d="m59 126 4-2" fill="none" stroke="#ba8066" stroke-width="1.4" stroke-linecap="round"/>
+            </g>
+            <g id="person-chef">
+                <path d="M4 155 8 117q3-22 20-32l15-6h19l16 6q18 9 21 31l4 39z" fill="#eee0cb"/>
+                <path d="M35 93l20 15v47" fill="none" stroke="#c4ada0" stroke-width="2.6"/>
+                <path d="M44 116h.1m19 0h.1m-19 12h.1m19 0h.1m-19 12h.1m19 0h.1" stroke="#8f7c79" stroke-width="3.3" stroke-linecap="round"/>
+                <path d="M42 71h21v12L52 95 41 83z" fill="#b9785d"/>
+                <path d="m32 84 20 7 19-7-7 12-11 4-12-4z" fill="#c96a70"/>
+                <path d="M26 37q4-14 26-14 23 0 27 14l-2 21q-4 22-24 23-22-1-26-23z" fill="#cd906b"/>
+                <path d="M26 50q-7-1-7 5 1 5 9 6m49-11q7-1 7 5-1 5-9 6" fill="#cd906b"/>
+                <path d="M25 45 23 34q-12-6-8-16 4-9 17-8 4-9 18-9 13 0 19 9 13-2 18 8 4 10-7 17l-3 10z" fill="#f7ecd9"/>
+                <path d="M24 36q29-4 55 0l-2 9H25z" fill="#d8c5b7"/>
+                <path d="M38 51q3-3 6 0m16 0q3-3 6 0" fill="none" stroke="#52363d" stroke-width="2.5" stroke-linecap="round"/>
+                <path d="M44 62q9 6 18 0-3 9-9 9-6 0-9-9z" fill="#694044"/>
+                <path d="M8 131q8 4 18 3l-1 21H5zm73 3q9 1 19-3l3 24H83z" fill="#cd906b"/>
+                <path d="M26 107q-3 12-3 22m58-21q2 10 3 21" fill="none" stroke="#c4ada0" stroke-width="2.4" stroke-linecap="round"/>
+                <path d="M8 126q8 4 18 3l-1 7q-10 1-18-3zm73 3q9 1 18-3l1 7q-9 4-18 3z" fill="#dcc7b5"/>
+            </g>
+            <g id="person-singer">
+                <path d="M11 154q5-37 11-54 8-17 26-20l16 2q18 6 24 23l8 49z" fill="#7e557f"/>
+                <path d="m26 95 13-11 8 17-11 53H19zm52 0-12-11-9 16 7 54h23z" fill="#ab638c"/>
+                <path d="M27 105q-4 18-5 41" fill="none" stroke="#683b70" stroke-width="2.5" stroke-linecap="round"/>
+                <path d="m49 106 3 7 8 1-6 5 2 8-7-4-7 4 2-8-6-5 8-1z" fill="#ecb5c7"/>
+                <path d="M41 67h20v17l-9 10-12-10z" fill="#9f6354"/>
+                <path d="M24 45q-3-25 16-31 18-7 32 7 11 12 3 33l-4 13-5-13-35 10z" fill="#663256"/>
+                <path d="M33 34q7-13 20-11 15 2 17 17l2 14q-4 22-21 24-16-4-20-23z" fill="#bc7e65"/>
+                <path d="M25 52q-7-8-5-23 3-13 17-17l13-8 3 8 14-4q16 9 13 26l-9 11-4-12q-10 10-21 9l3-12q-9 14-18 19l-1 14z" fill="#a04f83"/>
+                <path d="M35 26q7-9 19-11m7 10 10-6" fill="none" stroke="#c875a3" stroke-width="2.8" stroke-linecap="round"/>
+                <path d="m38 53 6-2m13 0 6 1m-16 11q5 4 10-2" fill="none" stroke="#56323d" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M72 57v9" stroke="#f6bd80" stroke-width="2" stroke-linecap="round"/>
+                <circle cx="72" cy="68" r="3" fill="#f6bd80"/>
+                <path d="M81 95q10 10 13 26 3 13-6 17-10 4-15-5l-8-16 12-6 5 10-3-12" fill="#94597f" stroke="#683b70" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m68 112 10 5m-5 5 9-5" fill="none" stroke="#b77b9e" stroke-width="2"/>
+                <path d="m72 116 8-24" stroke="#3c314d" stroke-width="6" stroke-linecap="round"/>
+                <circle cx="81" cy="89" r="7" fill="#c896bc"/>
+                <path d="m68 115-2-6q-1-4 2-5 2 0 3 3l2-3q3-3 6-1 2 2-1 4l-1 1q3 1 2 4l-2 4-7 3z" fill="#bc7e65"/>
+                <path d="m74 111 3-3" fill="none" stroke="#925b53" stroke-width="1.4" stroke-linecap="round"/>
+            </g>
+            <g id="person-detective">
+                <path d="M1 154q2-37 14-56 9-15 32-20h14q23 5 33 21 9 19 11 55z" fill="#9a7566"/>
+                <path d="m31 84-11 19 12 1-6 13 21 37h21l9-40-7-10 11-2-12-18-13 19z" fill="#bc957e"/>
+                <path d="M45 72h18v13l-9 13-12-12z" fill="#d89570"/>
+                <path d="m43 87 11 11 10-11-1 26-9 18-10-19z" fill="#665060"/>
+                <path d="M30 39q3-19 22-20 20-1 25 18l-1 21q-3 18-15 24-11 4-21-6-7-7-8-17z" fill="#efb98d"/>
+                <path d="M33 46q-8-2-8 4 0 6 8 9" fill="#efb98d"/>
+                <path d="M24 36 30 16q3-5 9-4l13 3 14-4q6-1 9 5l7 20z" fill="#735b53"/>
+                <path d="M27 27q24 2 52-1l3 10H24z" fill="#4e4043"/>
+                <path d="M6 37q10-5 47-5 35-1 46 2 1 5-15 9-33 9-72 1-7-2-6-7z" fill="#a47d69"/>
+                <path d="M42 55h.1m22-2h.1m-18 15q4-2 9-1" fill="none" stroke="#604249" stroke-width="2.8" stroke-linecap="round"/>
+                <path d="M18 106q-5 15-6 42" fill="none" stroke="#785951" stroke-width="2.3" stroke-linecap="round"/>
+                <path d="M83 92q11 10 15 25 3 10-2 16-6 6-13 2-6-3-7-13l1-14 13 1-1 11-3-14" fill="#9a7566" stroke="#785951" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m77 115 12 1" stroke="#c39c84" stroke-width="2.6" stroke-linecap="round"/>
+                <path d="m84 113 7-20" stroke="#4d3d47" stroke-width="4.5" stroke-linecap="round"/>
+                <circle cx="93" cy="85" r="10" fill="#b9cbd1" fill-opacity=".65" stroke="#4d3d47" stroke-width="3"/>
+                <path d="m89 83 5-2" stroke="#f0dad3" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="m78 108 1-7q0-3 3-3 2 0 2 3l-1 2 6-3q3-1 4 2 1 1-1 3 2 2 0 4l-3 4-10-1z" fill="#efb98d"/>
+                <path d="m87 106 4-2" fill="none" stroke="#ba8066" stroke-width="1.4" stroke-linecap="round"/>
+            </g>
+            <g id="person-ninja">
+                <path d="M7 154q4-37 13-57 7-15 26-19l19 2q22 5 27 24l7 50z" fill="#4f4b70"/>
+                <path d="M33 84 72 132l-10 10-42-43z" fill="#b3586e"/>
+                <path d="M31 79q-6-6-7-17l1-23q0-12 11-19 12-9 24-6 22 4 23 25l-1 21q-2 14-12 22-18 12-39-3z" fill="#34314d"/>
+                <path d="M27 46q8-6 24-6 19 0 29 6l-2 11q-26 6-51 0z" fill="#d5a084"/>
+                <path d="M25 43q16-12 33-10 13 1 25 7l-2 7q-30-10-56 1zm55 0 18-6-4 7 9 3-21 2z" fill="#b3586e"/>
+                <path d="M30 58q23 4 49-2l-1 9q-8 13-25 14-17 0-23-14z" fill="#413b5b"/>
+                <path d="m36 51 7 2m19 0 7-3m-29 6h.1m25-1h.1" fill="none" stroke="#553b46" stroke-width="2.1" stroke-linecap="round"/>
+                <path d="M82 90q12 9 15 27 2 11-4 16-7 5-18 1l-39-12 4-13 37 10-4-13" fill="#45405f" stroke="#302e48" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M24 92q-9 7-13 23-4 13 1 19 6 7 17 3l49-20-5-12-45 17 5-13" fill="#534d70" stroke="#302e48" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m58 112 5 12m1-14 5 12m1-14 5 12m6 4 1 8m5-8 1 7" stroke="#77708c" stroke-width="2"/>
+            </g>
+        </defs>
+    </svg>
+
+    <!-- 1. 시작 화면 -->
+    <div id="start-screen" class="bg-white/10 backdrop-blur-md border border-white/20 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+        <svg class="mx-auto mb-4" width="84" height="84" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <circle cx="50" cy="50" r="47" fill="#293753" stroke="#8296bd" stroke-width="2"/>
+            <path d="M17 44h14M13 54h13m-8 10h10" stroke="#8acbdc" stroke-width="3" stroke-linecap="round"/>
+            <path d="m52 39 13 12 12-5m-29-5-10 12-9 1" fill="none" stroke="#f4bb91" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="m48 56-9 13-13 4m25-15 15 6 8 12" fill="none" stroke="#9bd8ed" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="m26 73-6 2m54 1 6 1" stroke="#fff0bc" stroke-width="5" stroke-linecap="round"/>
+            <path d="m52 39-5 16" stroke="#f7bf62" stroke-width="14" stroke-linecap="round"/>
+            <circle cx="62" cy="26" r="9" fill="#f4bb91"/>
+            <path d="M54 27q-4-11 8-12l9 5q-5 6-13 3l-2 5z" fill="#43344e"/>
+        </svg>
+        <h1 class="text-3xl md:text-4xl font-black mb-2 text-yellow-300 drop-shadow-md">번화가 탈출 게임</h1>
+        <p class="text-lg text-gray-200 mb-6 font-bold">인파를 뚫고 무사히 빠져나가라!</p>
+        
+        <div class="bg-black/30 rounded-xl p-4 text-left text-sm text-gray-300 mb-8 space-y-2">
+            <p>✅ 길을 막는 사람들의 질문에 <strong>알맞은 답</strong>을 골라 최대한 빨리 빠져나가세요!</p>
+            <p>✅ 총 <strong>10문제</strong>를 풀어야 탈출할 수 있습니다.</p>
+            <p>❌ 오답을 고르면 길을 잃어 <strong>시간이 3초 추가</strong>됩니다.</p>
+            <p>📸 탈출 성공 후 <strong>최종 기록 화면을 캡쳐해서 패들렛에 업로드</strong> 하세요!</p>
+        </div>
+
+        <button onclick="startGame()" class="w-full bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-300 hover:to-orange-400 text-black font-black text-xl py-4 rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95">
+            게임 시작!
+        </button>
+    </div>
+
+    <!-- 2. 게임 화면 (초기엔 숨김) -->
+    <div id="game-screen" class="hidden bg-white/10 backdrop-blur-md border border-white/20 p-6 md:p-8 rounded-2xl shadow-2xl max-w-xl w-full relative overflow-hidden">
+        <!-- 상단 헤더: 진행도 & 타이머 -->
+        <div class="flex justify-between items-center border-b border-white/20 pb-4 mb-6">
+            <div class="text-lg font-bold text-gray-300">
+                진행도: <span id="progress" class="text-white">1 / 10</span>
+            </div>
+            <div class="text-3xl font-bold timer-font text-yellow-300 tracking-wider">
+                <span id="timer">0.0</span>초
+            </div>
+        </div>
+
+        <!-- 캐릭터 및 말풍선 (슬라이드 애니메이션 적용 영역) -->
+        <div id="character-area" class="min-h-[200px] flex flex-col justify-end items-center mb-8 text-center slide-in">
+            <div class="speech-bubble text-lg md:text-xl shadow-lg w-full max-w-md">
+                <span id="question-text">질문이 이곳에 나타납니다.</span>
+            </div>
+            <svg class="character-line" width="320" height="160" viewBox="0 0 320 160" aria-hidden="true" focusable="false">
+                <g id="later-person" transform="translate(228 3) scale(.57)" opacity=".54" mask="url(#person-waist)">
+                    <use href="#person-chef"/>
+                </g>
+                <g id="next-person" transform="translate(177 3) scale(.76)" opacity=".75" mask="url(#person-waist)">
+                    <use href="#person-student"/>
+                </g>
+                <g transform="translate(110 0)">
+                    <g id="current-person" mask="url(#person-waist)">
+                        <use href="#person-farmer"/>
+                    </g>
+                </g>
+            </svg>
+        </div>
+
+        <!-- 선택지 버튼 컨테이너 -->
+        <div id="answers-container" class="grid grid-cols-1 gap-3">
+            <!-- 버튼들은 JS로 동적 생성됨 -->
+        </div>
+    </div>
+
+    <!-- 3. 결과 화면 (초기엔 숨김) -->
+    <div id="result-screen" class="hidden bg-white/10 backdrop-blur-md border border-white/20 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+        <div class="text-6xl mb-4">🎉</div>
+        <h1 class="text-4xl font-black mb-2 text-green-400 drop-shadow-md">탈출 성공!</h1>
+        <p class="text-gray-200 mb-6 text-lg">복잡한 번화가를 무사히 빠져나왔습니다.</p>
+        
+        <div class="bg-black/40 rounded-xl p-6 mb-8 border border-yellow-300/30">
+            <p class="text-gray-400 text-sm mb-1">최종 기록</p>
+            <div class="text-5xl font-black timer-font text-yellow-300">
+                <span id="final-time">0.0</span>초
+            </div>
+        </div>
+
+        <div class="bg-blue-900/50 border border-blue-400/50 rounded-lg p-4 mb-6">
+            <p class="font-bold text-blue-200 text-lg animate-pulse">📸 이 화면을 캡쳐해서</p>
+            <p class="font-bold text-blue-100">패들렛(Padlet) 과제방에 올려주세요!</p>
+        </div>
+
+        <button onclick="location.reload()" class="w-full bg-white/20 hover:bg-white/30 text-white font-bold text-lg py-3 rounded-xl transition">
+            다시 도전하기
+        </button>
+    </div>
+
+    <script>
+        // 1. 문제 데이터 (일본어/한국어 혼합)
+        const questionPool = [
+            { q: "저기요! 『スポーツでは 何が 好きですか。』", a: "やきゅうが 好きです。", options: ["やきゅうが 好きです。", "みかんが 好きです。", "英語が 好きです。"] },
+            { q: "어이! 『あの 町は どうですか。』라고 묻잖아. 무슨 뜻이야?", a: "저 마을은 어떻습니까?", options: ["저 마을은 어떻습니까?", "저 마을은 어디입니까?", "이 마을은 어떻습니까?"] },
+            { q: "잠깐! '별로 유명하지 않습니다'라고 대답하려면?!", a: "あまり ゆうめいじゃ ありません。", options: ["あまり ゆうめいじゃ ありません。", "とても ゆうめいです。", "ゆうめいじゃ ありませんでした。"] },
+            { q: "학생! 『くだものでは 何が 好きですか。』", a: "いちごが 好きです。", options: ["いちごが 好きです。", "バスケが 好きです。", "すうがくが 好きです。"] },
+            { q: "거기 학생! 『あの びょういんは しんせつだ。』가 무슨 뜻이야?", a: "저 병원은 친절하다.", options: ["저 병원은 친절하다.", "저 병원은 유명하다.", "저 병원은 조용하다."] },
+            { q: "이봐! '음료수 중에서는 무엇을 좋아합니까?'라고 물어봐!", a: "のみものでは 何が 好きですか。", options: ["のみものでは 何が 好きですか。", "くだものでは 何が 好きですか。", "スポーツでは 何が 好きですか。"] },
+            { q: "있잖아! 『かもくでは 何が 好きですか。』", a: "すうがくが 好きです。", options: ["すうがくが 好きです。", "テニスが 好きです。", "りんごが 好きです。"] },
+            { q: "잠깐만! 누군가 나한테 『とても にぎやかです。』라고 했어. 무슨 뜻이야?", a: "매우 번화합니다.", options: ["매우 번화합니다.", "매우 조용합니다.", "조금 번화합니다."] },
+            { q: "어이! '저 온천은 어때?'라고 묻고 싶어!", a: "あの おんせんは どうですか。", options: ["あの おんせんは どうですか。", "その おんせんは どうですか。", "あの 町は どうですか。"] },
+            { q: "잠깐만요! 『その スマホは どうですか。』", a: "とても べんりです。", options: ["とても べんりです。", "とても きれいです。", "とても しんせつです。"] },
+            { q: "이봐! 『歌が 上手だ』라고 하던데, 무슨 말이야?", a: "노래를 잘한다.", options: ["노래를 잘한다.", "노래가 예쁘다.", "노래를 좋아한다."] },
+            { q: "거기! '매우 조용합니다'라고 말해주고 싶어!", a: "とても しずかです。", options: ["とても しずかです。", "あまり しずかじゃ ありません。", "とても ゆうめいです。"] },
+            { q: "저기! 『たいいくが 好きです。』", a: "체육을 좋아합니다.", options: ["체육을 좋아합니다.", "수학을 좋아합니다.", "음악을 좋아합니다."] },
+            { q: "잠깐! '사과'가 일본어로 뭐였지?!", a: "りんご", options: ["りんご", "いちご", "みかん"] },
+            { q: "어이! 『あの 町は にぎやかだ。』 무슨 뜻이야?", a: "저 마을은 번화하다.", options: ["저 마을은 번화하다.", "저 마을은 조용하다.", "이 마을은 편리하다."] }
+        ];
+
+        const characters = [
+            'farmer',
+            'blonde',
+            'elder',
+            'officer',
+            'student',
+            'chef',
+            'singer',
+            'detective',
+            'ninja'
+        ];
+
+        // 2. 전역 변수
+        let gameQuestions = []; // 랜덤으로 10개 뽑아서 저장할 배열
+        let characterQueue = [];
+        let currentQuestionIndex = 0;
+        let startTime;
+        let timerInterval;
+        let totalPenalty = 0;
+        const TOTAL_QUESTIONS = 10;
+
+        // UI 요소
+        const screens = {
+            start: document.getElementById('start-screen'),
+            game: document.getElementById('game-screen'),
+            result: document.getElementById('result-screen')
+        };
+        const gameContainer = document.getElementById('game-container');
+        const timerDisplay = document.getElementById('timer');
+        const progressDisplay = document.getElementById('progress');
+        const characterArea = document.getElementById('character-area');
+        const questionDisplay = document.getElementById('question-text');
+        const characterSlots = ['current-person', 'next-person', 'later-person'].map(id => document.getElementById(id));
+        const answersContainer = document.getElementById('answers-container');
+
+        // 3. 유틸리티 함수: 배열 셔플 (Fisher-Yates)
+        function shuffle(array) {
+            let currentIndex = array.length, randomIndex;
+            while (currentIndex != 0) {
+                randomIndex = Math.floor(Math.random() * currentIndex);
+                currentIndex--;
+                [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+            }
+            return array;
+        }
+
+        // 4. 게임 시작
+        function startGame() {
+            // 초기화
+            currentQuestionIndex = 0;
+            totalPenalty = 0;
+            
+            // 문제 풀 셔플 후 10개 추출
+            const shuffledPool = shuffle([...questionPool]);
+            gameQuestions = shuffledPool.slice(0, TOTAL_QUESTIONS);
+            const shuffledCharacters = shuffle([...characters]);
+            characterQueue = gameQuestions.map((_, index) => shuffledCharacters[index % shuffledCharacters.length]);
+
+            // 화면 전환
+            screens.start.classList.add('hidden');
+            screens.game.classList.remove('hidden');
+
+            // 첫 문제 로드
+            loadQuestion();
+
+            // 타이머 시작
+            startTime = Date.now();
+            timerInterval = setInterval(updateTimer, 50); // 50ms 마다 갱신 (부드러운 카운팅)
+        }
+
+        // 5. 타이머 갱신
+        function updateTimer() {
+            const currentTime = Date.now();
+            const elapsed = (currentTime - startTime) / 1000 + totalPenalty;
+            timerDisplay.innerText = elapsed.toFixed(1);
+        }
+
+        // 6. 문제 로드
+        function loadQuestion() {
+            const currentQ = gameQuestions[currentQuestionIndex];
+            
+            // 애니메이션 클래스 설정
+            characterArea.classList.remove('slide-out');
+            characterArea.classList.add('slide-in');
+
+            // 헤더 업데이트
+            progressDisplay.innerText = `${currentQuestionIndex + 1} / ${TOTAL_QUESTIONS}`;
+            
+            // 질문을 표시하고 현재 인물과 뒤에서 기다리는 인물들을 배치
+            questionDisplay.innerText = currentQ.q;
+            characterSlots.forEach((slot, offset) => {
+                const person = characterQueue[currentQuestionIndex + offset];
+                slot.style.display = person ? '' : 'none';
+                if (!person) return;
+                slot.querySelector('use').setAttribute('href', `#person-${person}`);
+            });
+
+            // 선택지 셔플
+            let answerOptions = [...currentQ.options];
+            answerOptions = shuffle(answerOptions);
+
+            answersContainer.innerHTML = '';
+            answerOptions.forEach(option => {
+                const btn = document.createElement('button');
+                btn.className = 'answer-btn w-full bg-blue-900/80 hover:bg-blue-700 border border-blue-400/50 text-white font-bold py-4 px-6 rounded-xl text-left text-lg shadow-md flex items-center group';
+                
+                btn.innerHTML = `
+                    <span class="flex-grow">${option}</span>
+                    <span class="text-blue-300 opacity-0 group-hover:opacity-100 transition-opacity transition-transform transform translate-x-[-10px] group-hover:translate-x-0">▶</span>
+                `;
+                
+                // 정답 여부 판별
+                const isCorrect = (option === currentQ.a);
+                btn.onclick = () => checkAnswer(isCorrect, btn);
+                answersContainer.appendChild(btn);
+            });
+        }
+
+        // 7. 정답 체크
+        function checkAnswer(isCorrect, buttonElement) {
+            // 중복 클릭 방지를 위해 컨테이너 일시 비활성화
+            answersContainer.style.pointerEvents = 'none';
+
+            if (isCorrect) {
+                // 정답 시
+                buttonElement.classList.remove('bg-blue-900/80', 'hover:bg-blue-700');
+                buttonElement.classList.add('bg-green-600', 'border-green-400');
+                
+                // 슬라이드 아웃 애니메이션 실행
+                characterArea.classList.remove('slide-in');
+                characterArea.classList.add('slide-out');
+                
+                setTimeout(() => {
+                    currentQuestionIndex++;
+                    if (currentQuestionIndex < TOTAL_QUESTIONS) {
+                        loadQuestion();
+                        answersContainer.style.pointerEvents = 'auto';
+                    } else {
+                        endGame();
+                    }
+                }, 300); // 0.3초 대기 후 다음 문제
+
+            } else {
+                // 오답 시 패널티 부여
+                totalPenalty += 3; // 3초 추가
+                updateTimer(); // 즉각적인 UI 반영
+                
+                // 버튼 시각적 피드백
+                buttonElement.classList.remove('bg-blue-900/80', 'hover:bg-blue-700');
+                buttonElement.classList.add('bg-red-600', 'border-red-400');
+                
+                // 화면 전체 흔들림 및 붉은 이펙트
+                gameContainer.classList.add('penalty-anim');
+                
+                // 마우스 클릭 위치 근처에 "+3초" 텍스트 띄우기
+                showFloatingPenalty();
+
+                setTimeout(() => {
+                    gameContainer.classList.remove('penalty-anim');
+                    // 버튼 색상 원상복구
+                    buttonElement.classList.remove('bg-red-600', 'border-red-400');
+                    buttonElement.classList.add('bg-blue-900/80', 'hover:bg-blue-700');
+                    
+                    answersContainer.style.pointerEvents = 'auto'; // 다시 클릭 가능하게
+                }, 400); // 애니메이션 시간(0.4초) 후 원상복구
+            }
+        }
+
+        // 8. 패널티 +3초 플로팅 텍스트 애니메이션
+        function showFloatingPenalty() {
+            const el = document.createElement('div');
+            el.innerText = "+3.0초";
+            el.className = 'floating-penalty';
+            
+            // 화면 중앙 상단 부근에 띄우기
+            el.style.top = '25%';
+            el.style.left = '50%';
+            el.style.transform = 'translate(-50%, -50%)';
+            
+            document.body.appendChild(el);
+            
+            setTimeout(() => {
+                el.remove();
+            }, 1000);
+        }
+
+        // 9. 게임 종료
+        function endGame() {
+            clearInterval(timerInterval); // 타이머 정지
+            
+            // 최종 시간 계산
+            const currentTime = Date.now();
+            const finalTime = ((currentTime - startTime) / 1000 + totalPenalty).toFixed(1);
+            
+            // 화면 전환
+            screens.game.classList.add('hidden');
+            screens.result.classList.remove('hidden');
+            
+            // 최종 시간 표시
+            document.getElementById('final-time').innerText = finalTime;
+        }
+    </script>
+</body>
+</html>
